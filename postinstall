@@ -4,10 +4,20 @@
 # this will take the nginx.conf.in template and replace the PORT_WWW variable with
 # the PORT_WWW env variable.
 nginx_config_template="/home/dotcloud/current/nginx/nginx.conf.in"
-
 if [ -e "$nginx_config_template" ]; then
-   sed > $HOME/nginx/conf/nginx.conf < $nginx_config_template    \
-    -e "s/@PORT_WWW@/${PORT_WWW:-42800}/g"
+   sed > $HOME/nginx/conf/nginx.conf < $nginx_config_template \
+    -e "s/@PORT_WWW@/${PORT_WWW:-42800}/g" \
+    -e "s/@PORT_AUTH@/${PORT_AUTH:-1337}/g" \
+    -e "s/@PORT_APP@/${PORT_APP:-8080}/g"
 else
     echo "($nginx_config_template) isn't there!!! Make sure it is in the correct location or else nginx won't be setup correctly."
+fi
+
+access_template="/home/dotcloud/current/nginx/access.lua.in"
+if [ -e "$nginx_config_template" ]; then
+   sed > $HOME/nginx/conf/access.lua < $access_template \
+    -e "s/@APP_ID@/${ACCESS_APP_ID}/g" \
+    -e "s/@APP_SECRET@/${ACCESS_APP_SECRET}/g" \
+else
+    echo "($access_template) isn't there!!! Make sure it is in the correct location or else authentication won't be setup correctly."
 fi

@@ -6,23 +6,29 @@
 # nginx will be managed by supervisord when it starts so we don't need daemon mode
 daemon off;
 
-worker_processes    1;
+worker_processes 1;
 
 events {
-    worker_connections  1024;
+  worker_connections 1024;
 }
 
 http {
 
- include       mime.types;
- default_type  application/octet-stream;
+  include mime.types;
+  default_type application/octet-stream;
 
- sendfile        on;
- #tcp_nopush     on;
+  sendfile on;
+  #tcp_nopush on;
 
- keepalive_timeout  65;
+  keepalive_timeout 65;
 
- gzip  on;
+  gzip on;
+
+  # The app we are proxying to
+  upstream production-app { server localhost:@PORT_APP@; }
+
+  # The internal oauth provider
+  upstream internal-oauth { server localhost:@PORT_AUTH@; }
 
   server {
     # PORT_WWW value is added via postinstall script. DON'T TOUCH unless you know what you are doing or it may not work.
@@ -31,16 +37,10 @@ http {
     server_name localhost;
 
     log_format combined-realip '$remote_addr ($http_x_real_ip) - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"';
-    access_log  /var/log/supervisor/nginx_access.log combined-realip;
-    error_log  /var/log/supervisor/nginx_error.log error;
+    access_log /var/log/supervisor/nginx_access.log combined-realip;
+    error_log /var/log/supervisor/nginx_error.log error;
 
-    root    /home/dotcloud/current/static;
-
-    location / {
-        if ( -f /home/dotcloud/current/maintenance) {
-            return 503;
-        }
-    }
+    root /home/dotcloud/current/static;
 
     error_page 404 @404;
     error_page 500 @500;
@@ -48,32 +48,39 @@ http {
     error_page 503 @503;
     error_page 504 @504;
 
-    location @404 {
-        rewrite ^ /static/404.html;
-    }
-    location @500 {
-        rewrite ^ /static/500.html;
-    }
-    location @502 {
-        rewrite ^ /static/502.html;
-    }
-    location @503 {
-        rewrite ^ /static/503.html;
-    }
-    location @504 {
-        rewrite ^ /static/504.html;
-    }
+    location @404 { rewrite ^ /static/404.html; }
+    location @500 { rewrite ^ /static/500.html; }
+    location @502 { rewrite ^ /static/502.html; }
+    location @503 { rewrite ^ /static/503.html; }
+    location @504 { rewrite ^ /static/504.html; }
 
-    location /static {
-        alias /home/dotcloud/current/static;
-    }
+    location /static { alias /home/dotcloud/current/static; }
+    location /robots.txt { alias /home/dotcloud/current/static/robots.txt; }
+    location /favicon.ico { alias /home/dotcloud/current/static/favicon.ico; }
 
-    location /robots.txt {
-        alias /home/dotcloud/current/static/robots.txt;
-    }
+    # DO THE AUTH SUTFF!
+    # This will run for everything but subrequests
+    access_by_lua_file "/home/dotcloud/nginx/conf/access.lua";
 
-    location /favicon.ico {
-        alias /home/dotcloud/current/static/favicon.ico;
+    # Used in a subrequest
+    location /_access_token { proxy_pass http://internal-oauth/oauth/access_token; }
+    location /_user { proxy_pass http://internal-oauth/user; }
+
+    location / {
+      if ( -f /home/dotcloud/current/maintenance) {
+        return 503;
+      }
+
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header Host $http_host;
+      proxy_redirect off;
+      proxy_max_temp_file_size 0;
+
+      if (!-f $request_filename) {
+        proxy_pass http://production-app;
+        break;
+      }
     }
 
     include /home/dotcloud/current/*nginx.conf;

@@ -2,8 +2,11 @@ nginx:
     type: custom
     buildscript: nginx/builder
     systempackages:
-        # needed for the Nginx rewrite module
-        - libpcre3-dev
+        - libpcre3-dev # needed for the Nginx rewrite module
+        - lua5.1 # needed???
+        - liblua5.1-dev # needed for the Nginx lua module
+        - libluajit-5.1-dev # needed for the Nginx lua module fast
+        - liblua5.1-json
     ports:
         www: http
     processes:

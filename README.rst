@@ -1,6 +1,6 @@
 Nginx-on-dotcloud
 =================
-Custom nginx install on dotcloud
+Custom nginx install on dotcloud based on [tengine](https://github.com/alibaba/tengine/)
 
 How to use
 ----------
