@@ -1,0 +1,134 @@
+if ngx.var.uri == "/favicon.ico" then return ngx.location.capture(ngx.var.uri) end
+if ngx.var.uri == "/static/persona.html" then return end
+if ngx.var.uri == "/static/wood.png" then return end
+
+-- handles all the authentication, don't touch me
+-- skip favicon
+local WHITELIST = @WHITELIST_DOMAINS@
+
+local CLEAN_AUTH_COOKIE = "NGAuth=deleted; path=/; Expires=Thu, 01-Jan-1970 00:00:01 GMT"
+local CLEAN_PATH_COOKIE = "NGPath=deleted; path=/; Expires=Thu, 01-Jan-1970 00:00:01 GMT"
+
+local VERIFY_URL = "https://verifier.login.persona.org/verify"
+
+local function pt(name, t)
+  s = name .. " = { "
+  for k,v in pairs(t) do s=s.."("..k..","..v.."), " end
+  s = s .. " }"
+  ngx.log(ngx.INFO, s)
+end
+
+local cjson = require("cjson")
+local https = require("ssl.https")
+local url = require("socket.url")
+
+ngx.log(ngx.INFO, "################################################################################")
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+local function encode(s)
+    return ngx.encode_base64(ndk.set_var.set_encrypt_session(cjson.encode(s)))
+end
+
+local function decode(s)
+    return cjson.decode(ndk.set_var.set_decrypt_session(ngx.decode_base64(s)))
+end
+
+-- functions
+local function is_email_domain_allowed(email, whitelist)
+    local name, domain
+    name, domain = string.match(email, "(.*)@(.*)")
+    return whitelist[domain]
+end
+
+local function default_https_port(u)
+   return url.build(url.parse(u, {port = PORT}))
+end
+
+local function post(url, body)
+    local result_table = {}
+    local body, code, headers, status = https.request{
+    url = url,
+    method = "POST",
+    sink = ltn12.sink.table(result_table),
+    source = ltn12.source.string(body),
+    headers = {
+         ["content-length"] = #body,
+         ["content-type"] = "application/json",
+      },
+    }
+
+    local json_body = ""
+    for i, value in ipairs(result_table) do json_body = json_body .. value end
+
+    return json_body, code, headers, status
+end
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+local encrypted_session = ngx.var.cookie_NGAuth or nil
+local session = {}
+
+ngx.log(ngx.INFO, "ngx.var.cookie_NGAuth = ", encrypted_session)
+if encrypted_session ~= nil then session = decode(encrypted_session) end
+
+pt('session', session)
+
+if session.email == nil or not is_email_domain_allowed(session.email, WHITELIST) then
+    ngx.log(ngx.INFO, "session.email = ", session.email)
+
+    local assertion = ngx.req.get_post_args()['assertion'] or nil
+    local post_body = cjson.encode({assertion = assertion, audience = 'localhost:42800',})
+    local body, code, headers, status = post(VERIFY_URL, post_body)
+    local resp = cjson.decode(body)
+
+    if code ~= ngx.HTTP_OK then
+        ngx.log(ngx.INFO, "bad auth")
+
+        -- failure states include
+        -- {"status":"failure","reason":"need assertion and audience"}
+        -- {"status":"failure","reason":"assertion has expired"}
+
+        -- redirect cookie
+        ngx.header["Set-Cookie"] = "NGPath=" .. ngx.var.uri .. "; path=/; Max-Age=" .. 120 .. "\n" .. CLEAN_AUTH_COOKIE
+        return ngx.redirect("/static/persona.html")
+
+    elseif code == ngx.HTTP_OK and resp.status == "failure" then
+        ngx.header.content_type = 'text/html';
+        ngx.header["Set-Cookie"] = CLEAN_AUTH_COOKIE .. "\n" .. CLEAN_PATH_COOKIE
+        return ngx.print(body)
+        -- return ngx.redirect("/static/persona.html")
+    elseif code == ngx.HTTP_OK and resp.status == "okay" then
+        -- {"status":"okay","email":"adam@example.com","audience":"localhost:42800","expires":1365663792578,"issuer":"login.persona.org"}
+        ngx.log(ngx.INFO, "good auth")
+
+        pt("good auth resp", resp)
+        session.email = resp.email
+        session.audience = resp.audience
+        session.expires = resp.expires
+        session.issuer = resp.issuer
+
+        pt("good auth session", session)
+    end
+end
+
+ngx.log(ngx.INFO, "session.email = ", session.email)
+ngx.log(ngx.INFO, "is ok? = ", is_email_domain_allowed(session.email, WHITELIST))
+
+if session.email ~= nil and is_email_domain_allowed(session.email, WHITELIST) then
+    pt("FINAL STAGE", session)
+
+    encrypted_session = encode(session)
+    -- local expires = tonumber(session.expires)
+    local ctime = os.date("%a, %d-%m-%y %H:%H:%S % GMT", expires)
+    -- local ctime = ngx.cookie_time(expires) -- this hard crashes the request without
+
+    local auth_cookie = "NGAuth=" .. encrypted_session .. "; path=/; Expires=" .. ctime
+    ngx.log(ngx.INFO, "setting cookie = ", auth_cookie)
+    ngx.header["Set-Cookie"] = auth_cookie .. "\n" .. CLEAN_PATH_COOKIE
+    -- ngx.redirect(ngx.var.cookie_NGPath or '/')
+end

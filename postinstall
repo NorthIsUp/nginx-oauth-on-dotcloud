@@ -1,20 +1,36 @@
 #!/usr/bin/env bash
 set -x
+
+WHITELIST_DOMAINS='{
+    ["disqus.com"] = true,
+    ["disqus.net"] = true,
+    ["northisup.com"] = true,
+}'
+
+DIR="$(dirname "$0")"
+PREFIX=$HOME/nginx
+# if there is a local exports file run it
+[ -f ${DIR}/local-exports ] && source ${DIR}/local-exports
+
 # PORT_WWW isn't available at build time so we need to put it in postinstall
 # this will take the nginx.conf.in template and replace the PORT_WWW variable with
 # the PORT_WWW env variable.
 escape_sed() { sed -e 's/\//\\\//g' -e 's/\&/\\\&/g' ; }
 
-export ACCESS_APP_ID="42a304e7d571871892a0"
-export ACCESS_APP_SECRET="474ec6445e38002a6112faf402d74f2ef01e712c"
-export ACCESS_ORG="disqus-inc"
-
 HSUB=$(echo "${HOME}" | escape_sed)
 nginx_config_template="${HOME}/current/nginx/nginx.conf.in"
 if [ -e "$nginx_config_template" ]; then
-    mkdir -p $HOME/nginx/conf
-    rm -f $HOME/nginx/conf/nginx.conf
-    sed > $HOME/nginx/conf/nginx.conf < $nginx_config_template \
+
+    # choose a random key every deploy if none specified, this will logout all users
+    tr=`which gtr` # use homebrew gtr when on a mac
+    RANDOM_KEY=$(${tr:-`which tr`} -dc A-Za-z0-9_ < /dev/urandom | head -c 32)
+    RANDOM_IV=$(${tr:-`which tr`} -dc A-Za-z0-9_ < /dev/urandom | head -c 16)
+
+    mkdir -p $PREFIX/conf
+    rm -f $PREFIX/conf/nginx.conf
+    sed > $PREFIX/conf/nginx.conf < $nginx_config_template \
+        -e "s/@ENCRYPTED_SESSION_KEY@/${ENCRYPTED_SESSION_KEY:-${RANDOM_KEY}}/g" \
+        -e "s/@ENCRYPTED_SESSION_IV@/${ENCRYPTED_SESSION_IV:-${RANDOM_IV}}/g" \
         -e "s/@PORT_WWW@/${PORT_WWW:-42800}/g" \
         -e "s/@PORT_AUTH@/${PORT_AUTH:-1337}/g" \
         -e "s/@PORT_APP@/${PORT_APP:-8080}/g" \
@@ -24,17 +40,30 @@ else
     echo "($nginx_config_template) isn't there!!! Make sure it is in the correct location or else nginx won't be setup correctly."
 fi
 
-access_template="${HOME}/current/nginx/access.lua.in"
+access_template="${HOME}/current/nginx/access.persona.lua.in"
 if [ -e "$access_template" ]; then
-    mkdir -p $HOME/nginx/lua
-    rm -f $HOME/nginx/lua/access.lua
-    sed > $HOME/nginx/lua/access.lua < $access_template \
-        -e "s/@APP_ID@/${ACCESS_APP_ID}/g" \
-        -e "s/@APP_SECRET@/${ACCESS_APP_SECRET}/g" \
-        -e "s/@ORG@/${ACCESS_ORG}/g" \
-        -e "s/@HOME@/${HSUB}/g"
+    WHITELIST_DOMAINS=$( printf %q $WHITELIST_DOMAINS )
+
+    mkdir -p $PREFIX/lua
+    rm -f $PREFIX/lua/access.lua
+    sed > $PREFIX/lua/access.lua < $access_template \
+        -e "s/@WHITELIST_DOMAINS@/${WHITELIST_DOMAINS}/g"
 else
     echo "($access_template) isn't there!!! Make sure it is in the correct location or else authentication won't be setup correctly."
 fi
+
+# access_template="${HOME}/current/nginx/access.oauth.lua.in"
+# if [ -e "$access_template" ]; then
+#     mkdir -p $PREFIX/lua
+#     rm -f $PREFIX/lua/access.lua
+#     sed > $PREFIX/lua/access.lua < $access_template \
+#         -e "s/@APP_ID@/${ACCESS_APP_ID}/g" \
+#         -e "s/@APP_SECRET@/${ACCESS_APP_SECRET}/g" \
+#         -e "s/@ORG@/${ACCESS_ORG}/g" \
+#         -e "s/@HOME@/${HSUB}/g"
+# else
+#     echo "($access_template) isn't there!!! Make sure it is in the correct location or else authentication won't be setup correctly."
+# fi
+
 
 set +x

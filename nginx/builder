@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 shopt -s extglob
 
+# if there is a local exports file run it
+[ -f ${DIR}/../local-exports ] && source ${DIR}/../local-exports
+
 # A POSIX variable
 OPTIND=1     # Reset in case getopts has been used previously in the shell.
 
@@ -19,60 +22,81 @@ OPTIONS:
 EOF
 }
 
+NGINX="resty"
+
 declare -A URLS=(
   ["tengine"]="https://github.com/alibaba/tengine/archive/tengine-1.4.4.tar.gz"
   ["resty"]="http://openresty.org/download/ngx_openresty-1.2.7.3.tar.gz"
   ["nginx"]="http://nginx.org/download/nginx-1.0.14.tar.gz"
+  ["luarocks"]="http://luarocks.org/releases/luarocks-2.0.12.tar.gz"
 )
 
-declare -A C=(
-  ["verbose"]=0
-  ["nginx"]="tengine"
-  ["nginx_download_url"]=${URLS["tengine"]}
-  ["clean"]=false
+declare -A INSTALLDIR=(
+  ["nginx"]="$HOME/nginx"
+  ["resty"]="$HOME/openresty"
+  ["tengine"]="$HOME/nginx"
 )
 
 declare -A BUILDOPTS=(
-  ["tengine"]=( --with-http_lua_module )
-  ["resty"]=()
-  ["nginx"]=()
+  ["nginx"]=''
+  ["resty"]='--with-luajit'
+  ["tengine"]=''
 )
 
+declare -A C=(
+  ["clean"]=false
+  ["debug"]=true
+  ["nginx"]=$NGINX
+  ["nginx_download_url"]=${URLS[$NGINX]}
+  ["verbose"]=0
+  ["nginx_install_dir"]=${INSTALLDIR[$NGINX]}
+)
+
+declare -A BUILDCHECK=(
+  ["nginx"]="objs/nginx"
+  ["resty"]="build/nginx-1.2.7/objs/nginx"
+  ["tengine"]="objs/nginx"
+)
 
 # Initialize our own variables:
 output_file=""
 verbose=0
 
-while getopts "h?vu:cn:" opt; do
+while getopts "h?vu:cn:d" opt; do
   case "$opt" in
   h|\?) usage ; exit 0 ; ;;
+  d)  C["debug"]=true ; ;;
   v)  verbose=1 ; ;;
   u)  C["nginx_download_url"]=$OPTARG ; ;;
   c)  C["clean"]=true ; ;;
-  n)  [ ${URLS[$OPTARG]} ] && C["nginx"]=$OPTARG ; C["nginx_download_url"]=${URLS[$OPTARG]} ;;
+  n)  [ ${URLS[$OPTARG]} ] &&
+        NGINX=$OPTARG&&
+        C["nginx"]=$NGINX &&
+        C["nginx_download_url"]=${URLS[$NGINX]} &&
+        C["nginx_install_dir"]=${INSTALLDIR[$NGINX]}
+      ;;
   esac
 done
 
 shift $((OPTIND-1))
-
-for i in "${!C[@]}"
-do
-  echo "key  : $i"
-  echo "value: ${C[$i]}"
-done
+if [ ${C["debug"]} ] ; then
+  echo "OPTS: " ; for i in "${!C[@]}" ; do echo "$i -> ${C[$i]}" ; done
+fi
 
 BUILDERDIR="$(dirname "$0")"
 
 # variables needed later.
 start_dir=`pwd`
-nginx_install_dir="$HOME/nginx"
+nginx_install_dir=${C["nginx_install_dir"]}
 stage_dir="${start_dir}/tmp"
-nginx_stage_dir="${stage_dir}/stage"
+nginx_stage_dir="${stage_dir}/nginx"
 nginx_download_url=${C["nginx_download_url"]}
 nginx_archive=${nginx_download_url##*/}
 
 
 [[ $(uname -s) == Darwin ]] && MAC_OPTS='--with-cc-opt=-I/usr/local/Cellar/pcre/8.32/include --with-ld-opt=-L/usr/local/Cellar/pcre/8.32/lib'
+
+echo 'adding' ${BUILDOPTS[$NGINX]}
 
 CONFIGOPTS=(
   --prefix=$nginx_install_dir
@@ -85,8 +109,7 @@ CONFIGOPTS=(
   --with-http_stub_status_module
   --with-http_sub_module
   --with-http_xslt_module
-  --with-luajit
-  ${BUILDOPTS[${C["nginx"]}]}
+  ${BUILDOPTS[$NGINX]}
   ${MAC_OPTS}
 )
 
@@ -114,22 +137,51 @@ move_to_approot() {
 }
 
 clean_nginx() {
-  if [ -d ${nginx_install_dir} ] ; then
-    cln "cleaning up (${nginx_install_dir})"
-    rm -rf ${nginx_install_dir}
-
-    cln "cleaning up (${nginx_stage_dir})"
-    rm -rf ${nginx_stage_dir}
-  fi
+  echo
+  ( ! ${C["clean"]} ) && skp "clean is false, not cleaning" && return
+  [ -d ${nginx_install_dir} ] && cln "cleaning up (${nginx_install_dir})" && rm -rf ${nginx_install_dir}
+  [ -d ${nginx_stage_dir} ] && cln "cleaning up (${nginx_stage_dir})" && rm -rf ${nginx_stage_dir}
+  die
 }
 
+install_lua_rocks() {
+  luarocks_url=${URLS["luarocks"]}
+  luarocks_archive=${luarocks_url##*/}
+  luarocks_stage_dir="${stage_dir}/luarocks"
+
+  if [ ! -f ${luarocks_archive} ] ; then
+    msg "downloading luarocks from (${luarocks_url})"
+    wget ${luarocks_url}
+    [ $? -eq 0 ] || die "can't fetch luarocks"
+    msg "Successfully downloaded ${luarocks_archive}"
+  fi
+
+  mkdir -p ${luarocks_stage_dir}
+  tar -C ${luarocks_stage_dir} --strip-components=1 -zxf ${luarocks_archive} || die "did not extract ${luarocks_archive} successfully"
+  msg "Successfully untarred into (${luarocks_stage_dir}) "
+
+  cd ${luarocks_stage_dir} || die "could not cd to ${luarocks_stage_dir}"
+
+  luajitpath="${nginx_install_dir}/luajit"
+
+  ./configure --prefix=${luajitpath} \
+    --with-lua=${luajitpath} \
+    --lua-suffix=jit \
+    --with-lua-include=${luajitpath}/include/luajit-2.0
+
+  msg "making luarocks from ${pwd}"
+  make && make install
+}
+
+
 install_lua_deps() {
-  `luarocks path`
+  luarocks="${nginx_install_dir}/luajit/bin/luarocks"
+  `$luarocks path`
 
   for rock in ${LUAROCKS[@]}; do
-    if [[ 0 == $(luarocks list | grep ${rock} -q) ]] ; then
+    if [[ 0 == $($luarocks list | grep ${rock} -q) ]] ; then
       ins "rock ${rock}"
-      luarocks install ${rock}
+      $luarocks install ${rock}
     else
       skp "installing rock ${rock} already installed"
     fi
@@ -148,7 +200,7 @@ install_nginx() {
   msg "installing Nginx into: ${nginx_install_dir}"
 
   # install nginx
-  if [ ! -x ${nginx_stage_dir}/objs/nginx ] ; then
+  if ( ${C["clean"]} ) || [ ! -x ${nginx_stage_dir}/${BUILDCHECK[$NGINX]} ] ; then
     msg "making directory: ${nginx_install_dir}"
     mkdir -p ${nginx_install_dir}
 
@@ -156,15 +208,15 @@ install_nginx() {
     mkdir -p ${nginx_stage_dir}
 
     if [ ! -f ${nginx_archive} ] ; then
-      msg "downloading nginx from (${nginx_url}) and untaring into (${nginx_stage_dir}) "
+      msg "downloading nginx from (${nginx_url})"
       wget ${nginx_url}
       [ $? -eq 0 ] || die "can't fetch nginx"
-      msg "Successfully download nginx"
+      msg "Successfully downloaded ${nginx_archive}"
     fi
 
     echo ${nginx_download_url##*/}
     tar -C ${nginx_stage_dir} --strip-components=1 -zxf ${nginx_archive} || die "did not extract ${nginx_archive} successfully"
-    msg "Successfully untarred nginx"
+    msg "Successfully untarred into (${nginx_stage_dir}) "
 
     msg "move into ${nginx_stage_dir} "
     cd ${nginx_stage_dir}
@@ -172,8 +224,8 @@ install_nginx() {
     msg "trying to compile nginx, and then install it"
     export CFLAGS="-O3 -pipe"
 
-    msg "./configure ${CONFIGOPTS[@]}"
-    ./configure ${CONFIGOPTS[@]} && make
+    msg "$(pwd) ./configure ${CONFIGOPTS[@]}"
+    ./configure ${CONFIGOPTS[@]} && make -j4
     [[ $? == 0 ]] || die "nginx install failed"
 
     ins "Successfully compiled nginx"
@@ -183,6 +235,10 @@ install_nginx() {
 
   cd ${nginx_stage_dir}
   make install
+
+  if [ $NGINX == "resty" ] ; then
+    ln -s $nginx_install_dir/nginx $nginx_install_dir/../nginx
+  fi
 
   msg "remove some of the default config files from the nginx config directory that aren't needed"
   rm ${nginx_install_dir}/conf/*.default
@@ -197,6 +253,7 @@ install_nginx() {
 }
 
 build_profile(){
+  msg "adding nginx to path of ${start_dir}/profile"
   cat > $start_dir/profile << EOF
 export PATH="${nginx_install_dir}/sbin:${PATH}"
 EOF
@@ -225,14 +282,16 @@ move_to_approot
 # uncomment this. Don't do this everytime, or else each build will be slow.
 
 STAGE="Step 1"
-msg "Step 1: install lua deps"
-install_lua_deps
-
-[ C["clean"] ] && msg "Step 1.5: cleaup old nginx build::" && clean_nginx
+msg "Step 1: cleaup old nginx build::"
+clean_nginx
 
 STAGE="Step 2"
 msg "Step 2: install nginx::"
 install_nginx
+
+msg "Step 2.5: install luarocks::"
+install_lua_rocks
+install_lua_deps
 
 STAGE="Step 3"
 msg "Step 3: build profile::"

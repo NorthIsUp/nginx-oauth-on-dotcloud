@@ -2,3 +2,4 @@
 *.tar.gz
 *.DS_Store
 tmp
+local-exports

@@ -38,11 +38,15 @@ http {
     # PORT_WWW value is added via postinstall script. DON'T TOUCH unless you know what you are doing or it may not work.
     listen  @PORT_WWW@ default;
 
+    encrypted_session_expires 500;
+    encrypted_session_key '@ENCRYPTED_SESSION_KEY@';
+    encrypted_session_iv '@ENCRYPTED_SESSION_IV@';
+
     server_name localhost;
 
     log_format combined-realip '$remote_addr ($http_x_real_ip) - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"';
     access_log /var/log/supervisor/nginx_access.log combined-realip;
-    error_log /var/log/supervisor/nginx_error.log error;
+    error_log /var/log/supervisor/nginx_error.log info;
 
     root @HOME@/current/static;
 
@@ -52,11 +56,19 @@ http {
     error_page 503 @503;
     error_page 504 @504;
 
-    location @404 { rewrite ^ /static/404.html; }
-    location @500 { rewrite ^ /static/500.html; }
-    location @502 { rewrite ^ /static/502.html; }
-    location @503 { rewrite ^ /static/503.html; }
-    location @504 { rewrite ^ /static/504.html; }
+    # make these better next
+    # location @404 { rewrite ^ /static/404.html; }
+    # location @500 { rewrite ^ /static/500.html; }
+    # location @502 { rewrite ^ /static/502.html; }
+    # location @503 { rewrite ^ /static/503.html; }
+    # location @504 { rewrite ^ /static/504.html; }
+
+    location @404 { rewrite ^ http://en.wikipedia.org/wiki/List_of_HTTP_status_codes#404; }
+    location @500 { rewrite ^ http://en.wikipedia.org/wiki/List_of_HTTP_status_codes#500; }
+    location @502 { rewrite ^ http://en.wikipedia.org/wiki/List_of_HTTP_status_codes#502; }
+    location @503 { rewrite ^ http://en.wikipedia.org/wiki/List_of_HTTP_status_codes#503; }
+    location @504 { rewrite ^ http://en.wikipedia.org/wiki/List_of_HTTP_status_codes#504; }
+
 
     location /static { alias @HOME@/current/static; }
     location /robots.txt { alias @HOME@/current/static/robots.txt; }
@@ -64,11 +76,9 @@ http {
 
     # DO THE AUTH SUTFF!
     # This will run for everything but subrequests
-    access_by_lua_file "@HOME@/nginx/lua/access.lua";
 
-    # Used in a subrequest
-    location /_access_token { proxy_pass http://internal-oauth/oauth/access_token; }
-    location /_user { proxy_pass http://internal-oauth/user; }
+    lua_need_request_body on;
+    access_by_lua_file "@HOME@/nginx/lua/access.lua";
 
     location / {
       if ( -f @HOME@/current/maintenance) {
