@@ -1,2 +1,4 @@
 *.pyc
+*.tar.gz
 *.DS_Store
+tmp

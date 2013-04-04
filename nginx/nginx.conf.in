@@ -14,6 +14,10 @@ events {
 
 http {
 
+  lua_code_cache off;
+
+  lua_package_path "@HOME@/nginx/lua/?.lua;;";
+
   include mime.types;
   default_type application/octet-stream;
 
@@ -40,7 +44,7 @@ http {
     access_log /var/log/supervisor/nginx_access.log combined-realip;
     error_log /var/log/supervisor/nginx_error.log error;
 
-    root /home/dotcloud/current/static;
+    root @HOME@/current/static;
 
     error_page 404 @404;
     error_page 500 @500;
@@ -54,20 +58,20 @@ http {
     location @503 { rewrite ^ /static/503.html; }
     location @504 { rewrite ^ /static/504.html; }
 
-    location /static { alias /home/dotcloud/current/static; }
-    location /robots.txt { alias /home/dotcloud/current/static/robots.txt; }
-    location /favicon.ico { alias /home/dotcloud/current/static/favicon.ico; }
+    location /static { alias @HOME@/current/static; }
+    location /robots.txt { alias @HOME@/current/static/robots.txt; }
+    location /favicon.ico { alias @HOME@/current/static/favicon.ico; }
 
     # DO THE AUTH SUTFF!
     # This will run for everything but subrequests
-    access_by_lua_file "/home/dotcloud/nginx/conf/access.lua";
+    access_by_lua_file "@HOME@/nginx/lua/access.lua";
 
     # Used in a subrequest
     location /_access_token { proxy_pass http://internal-oauth/oauth/access_token; }
     location /_user { proxy_pass http://internal-oauth/user; }
 
     location / {
-      if ( -f /home/dotcloud/current/maintenance) {
+      if ( -f @HOME@/current/maintenance) {
         return 503;
       }
 
@@ -83,6 +87,6 @@ http {
       }
     }
 
-    include /home/dotcloud/current/*nginx.conf;
+    include @HOME@/current/*nginx.conf;
   }
 }

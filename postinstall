@@ -1,23 +1,40 @@
 #!/usr/bin/env bash
-
+set -x
 # PORT_WWW isn't available at build time so we need to put it in postinstall
 # this will take the nginx.conf.in template and replace the PORT_WWW variable with
 # the PORT_WWW env variable.
-nginx_config_template="/home/dotcloud/current/nginx/nginx.conf.in"
+escape_sed() { sed -e 's/\//\\\//g' -e 's/\&/\\\&/g' ; }
+
+export ACCESS_APP_ID="42a304e7d571871892a0"
+export ACCESS_APP_SECRET="474ec6445e38002a6112faf402d74f2ef01e712c"
+export ACCESS_ORG="disqus-inc"
+
+HSUB=$(echo "${HOME}" | escape_sed)
+nginx_config_template="${HOME}/current/nginx/nginx.conf.in"
 if [ -e "$nginx_config_template" ]; then
-   sed > $HOME/nginx/conf/nginx.conf < $nginx_config_template \
-    -e "s/@PORT_WWW@/${PORT_WWW:-42800}/g" \
-    -e "s/@PORT_AUTH@/${PORT_AUTH:-1337}/g" \
-    -e "s/@PORT_APP@/${PORT_APP:-8080}/g"
+    mkdir -p $HOME/nginx/conf
+    rm -f $HOME/nginx/conf/nginx.conf
+    sed > $HOME/nginx/conf/nginx.conf < $nginx_config_template \
+        -e "s/@PORT_WWW@/${PORT_WWW:-42800}/g" \
+        -e "s/@PORT_AUTH@/${PORT_AUTH:-1337}/g" \
+        -e "s/@PORT_APP@/${PORT_APP:-8080}/g" \
+        -e "s/@HOME@/${HSUB}/g"
+    cat $nginx_config_template
 else
     echo "($nginx_config_template) isn't there!!! Make sure it is in the correct location or else nginx won't be setup correctly."
 fi
 
-access_template="/home/dotcloud/current/nginx/access.lua.in"
-if [ -e "$nginx_config_template" ]; then
-   sed > $HOME/nginx/conf/access.lua < $access_template \
-    -e "s/@APP_ID@/${ACCESS_APP_ID}/g" \
-    -e "s/@APP_SECRET@/${ACCESS_APP_SECRET}/g" \
+access_template="${HOME}/current/nginx/access.lua.in"
+if [ -e "$access_template" ]; then
+    mkdir -p $HOME/nginx/lua
+    rm -f $HOME/nginx/lua/access.lua
+    sed > $HOME/nginx/lua/access.lua < $access_template \
+        -e "s/@APP_ID@/${ACCESS_APP_ID}/g" \
+        -e "s/@APP_SECRET@/${ACCESS_APP_SECRET}/g" \
+        -e "s/@ORG@/${ACCESS_ORG}/g" \
+        -e "s/@HOME@/${HSUB}/g"
 else
     echo "($access_template) isn't there!!! Make sure it is in the correct location or else authentication won't be setup correctly."
 fi
+
+set +x

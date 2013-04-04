@@ -1,132 +1,245 @@
 #!/usr/bin/env bash
-
 shopt -s extglob
+
+# A POSIX variable
+OPTIND=1     # Reset in case getopts has been used previously in the shell.
+
+function usage () {
+  cat << EOF
+usage: $0 options
+
+Download, build, and install nginx with OAuth based auth wall.
+
+OPTIONS:
+   -h -?  Show this message
+   -u     Download nginx from there
+   -c     Clean first
+   -v     Verbose
+   -n     Which nginx to install? [nginx|resty|tengine]
+EOF
+}
+
+declare -A URLS=(
+  ["tengine"]="https://github.com/alibaba/tengine/archive/tengine-1.4.4.tar.gz"
+  ["resty"]="http://openresty.org/download/ngx_openresty-1.2.7.3.tar.gz"
+  ["nginx"]="http://nginx.org/download/nginx-1.0.14.tar.gz"
+)
+
+declare -A C=(
+  ["verbose"]=0
+  ["nginx"]="tengine"
+  ["nginx_download_url"]=${URLS["tengine"]}
+  ["clean"]=false
+)
+
+declare -A BUILDOPTS=(
+  ["tengine"]=( --with-http_lua_module )
+  ["resty"]=()
+  ["nginx"]=()
+)
+
+
+# Initialize our own variables:
+output_file=""
+verbose=0
+
+while getopts "h?vu:cn:" opt; do
+  case "$opt" in
+  h|\?) usage ; exit 0 ; ;;
+  v)  verbose=1 ; ;;
+  u)  C["nginx_download_url"]=$OPTARG ; ;;
+  c)  C["clean"]=true ; ;;
+  n)  [ ${URLS[$OPTARG]} ] && C["nginx"]=$OPTARG ; C["nginx_download_url"]=${URLS[$OPTARG]} ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+for i in "${!C[@]}"
+do
+  echo "key  : $i"
+  echo "value: ${C[$i]}"
+done
 
 BUILDERDIR="$(dirname "$0")"
 
 # variables needed later.
 start_dir=`pwd`
 nginx_install_dir="$HOME/nginx"
-stage_dir="$start_dir/tmp"
-nginx_stage_dir="$stage_dir/stage"
-nginx_download_url="https://github.com/alibaba/tengine/archive/tengine-1.4.4.tar.gz"
-# nginx_download_url="http://nginx.org/download/nginx-1.0.14.tar.gz"  #TODO configurable?
+stage_dir="${start_dir}/tmp"
+nginx_stage_dir="${stage_dir}/stage"
+nginx_download_url=${C["nginx_download_url"]}
+nginx_archive=${nginx_download_url##*/}
+
+
+[[ $(uname -s) == Darwin ]] && MAC_OPTS='--with-cc-opt=-I/usr/local/Cellar/pcre/8.32/include --with-ld-opt=-L/usr/local/Cellar/pcre/8.32/lib'
 
 CONFIGOPTS=(
-    --prefix=$nginx_install_dir
-    --with-http_addition_module
-    --with-http_dav_module
-    --with-http_geoip_module
-    --with-http_gzip_static_module
-    --with-http_realip_module
-    --with-http_stub_status_module
-    --with-http_ssl_module
-    --with-http_sub_module
-    --with-http_xslt_module
-    --with-http_lua_module
+  --prefix=$nginx_install_dir
+  --with-http_addition_module
+  --with-http_dav_module
+  --with-http_geoip_module
+  --with-http_gzip_static_module
+  --with-http_realip_module
+  --with-http_ssl_module
+  --with-http_stub_status_module
+  --with-http_sub_module
+  --with-http_xslt_module
+  --with-luajit
+  ${BUILDOPTS[${C["nginx"]}]}
+  ${MAC_OPTS}
 )
 
-# functions
-msg() { echo -e "\033[32m-->\033[0m $0:" $*; }
+LUAROCKS=(
+  luasocket
+  luasec
+  lua-cjson
+  luacrypto
+  lbase64
+)
 
-err() { echo -e "\033[31m-->\033[0m $0:" $*; }
+STAGE=""
+
+# functions
+msg() { echo -e "\033[32m-->\033[0m [${STAGE}] $0:" $*; }
+skp() { echo -e "\033[32m-->\033[0m [${STAGE}] $0: [\033[1;32m skip \033[0m] " $*; }
+ins() { echo -e "\033[32m-->\033[0m [${STAGE}] $0: [\033[1;32m install \033[0m] " $*; }
+cln() { echo -e "\033[33m-->\033[0m [${STAGE}] $0: [\033[1;32m clean \033[0m] " $*; }
+err() { echo -e "\033[31m-->\033[0m [${STAGE}] $0:" $*; }
 
 die() { err $*; exit 1; }
 
 move_to_approot() {
-    [ -n "$SERVICE_APPROOT" ] && cd $SERVICE_APPROOT
+  [ -n "${SERVICE_APPROOT}" ] && cd ${SERVICE_APPROOT}
 }
 
 clean_nginx() {
-    if [ -d $nginx_install_dir ] ; then
-        msg "cleaning up ($nginx_install_dir)"
-        rm -rf $nginx_install_dir
+  if [ -d ${nginx_install_dir} ] ; then
+    cln "cleaning up (${nginx_install_dir})"
+    rm -rf ${nginx_install_dir}
+
+    cln "cleaning up (${nginx_stage_dir})"
+    rm -rf ${nginx_stage_dir}
+  fi
+}
+
+install_lua_deps() {
+  `luarocks path`
+
+  for rock in ${LUAROCKS[@]}; do
+    if [[ 0 == $(luarocks list | grep ${rock} -q) ]] ; then
+      ins "rock ${rock}"
+      luarocks install ${rock}
+    else
+      skp "installing rock ${rock} already installed"
     fi
+
+  done
 }
 
 install_nginx() {
-    local nginx_url=$nginx_download_url
+  local nginx_url=${nginx_download_url}
 
-    msg "installing Nginx into: $nginx_install_dir"
+  if [ -z ${ACCESS_APP_ID} ] ; then
+    err "you don't have an ACCESS_APP_ID, ACCESS_APP_SECRET, or ACCESS_ORG set"
+    err "nginx will still build but the post_install step will not work correctly"
+  fi
 
-    # install nginx
-    if [ ! -d $nginx_install_dir ] ; then
-        msg "making directory: $nginx_install_dir "
-        mkdir -p $nginx_install_dir
+  msg "installing Nginx into: ${nginx_install_dir}"
 
-        msg "making directory: $nginx_stage_dir "
-        mkdir -p $nginx_stage_dir
+  # install nginx
+  if [ ! -x ${nginx_stage_dir}/objs/nginx ] ; then
+    msg "making directory: ${nginx_install_dir}"
+    mkdir -p ${nginx_install_dir}
 
-        msg "downloading nginx from ($nginx_url) and untaring into ($nginx_stage_dir) "
-        wget -O - $nginx_url | tar -C $nginx_stage_dir --strip-components=1 -zxf -
-        [ $? -eq 0 ] || die "can't fetch nginx"
+    msg "making directory: ${nginx_stage_dir}"
+    mkdir -p ${nginx_stage_dir}
 
-        msg "Successfully download and untarred nginx"
-
-        msg "move into $nginx_stage_dir "
-        cd $nginx_stage_dir
-
-        msg "trying to compile nginx, and then install it"
-        export CFLAGS="-O3 -pipe"
-
-        msg "./configure ${CONFIGOPTS[@]}"
-        ./configure ${CONFIGOPTS[@]} && make && make install
-        [ $? -eq 0 ] || die "Nginx install failed"
-
-        msg "Successfully compiled and installed nginx"
-
-        msg "remove some of the default config files from the nginx config directory that aren't needed"
-        rm $nginx_install_dir/conf/*.default
-
-        msg "cleaning up ($stage_dir) since it is no longer needed."
-        rm -rf $stage_dir
-
-        msg "change directories back to $start_dir"
-        cd $start_dir
-
-        msg "finished installing nginx."
-    else
-        msg "Nginx already installed, skipping this step."
+    if [ ! -f ${nginx_archive} ] ; then
+      msg "downloading nginx from (${nginx_url}) and untaring into (${nginx_stage_dir}) "
+      wget ${nginx_url}
+      [ $? -eq 0 ] || die "can't fetch nginx"
+      msg "Successfully download nginx"
     fi
+
+    echo ${nginx_download_url##*/}
+    tar -C ${nginx_stage_dir} --strip-components=1 -zxf ${nginx_archive} || die "did not extract ${nginx_archive} successfully"
+    msg "Successfully untarred nginx"
+
+    msg "move into ${nginx_stage_dir} "
+    cd ${nginx_stage_dir}
+
+    msg "trying to compile nginx, and then install it"
+    export CFLAGS="-O3 -pipe"
+
+    msg "./configure ${CONFIGOPTS[@]}"
+    ./configure ${CONFIGOPTS[@]} && make
+    [[ $? == 0 ]] || die "nginx install failed"
+
+    ins "Successfully compiled nginx"
+  else
+    skp "nginx already built, skipping this step"
+  fi
+
+  cd ${nginx_stage_dir}
+  make install
+
+  msg "remove some of the default config files from the nginx config directory that aren't needed"
+  rm ${nginx_install_dir}/conf/*.default
+
+  # msg "cleaning up (${stage_dir}) since it is no longer needed"
+  # rm -rf ${stage_dir}
+
+  msg "change directories back to ${start_dir}"
+  cd ${start_dir}
+
+  msg "finished installing nginx"
 }
 
 build_profile(){
-    cat > $start_dir/profile << EOF
-export PATH="$nginx_install_dir/sbin:$PATH"
+  cat > $start_dir/profile << EOF
+export PATH="${nginx_install_dir}/sbin:${PATH}"
 EOF
 
 }
 
 install_application() {
+  msg "change directories to ${start_dir}"
+  cd ${start_dir}
 
-    msg "change directories to $start_dir"
-    cd $start_dir
+  msg "moving ${start_dir}/profile to ~/"
+  mv ${start_dir}/profile ~/
 
-    msg "moving $start_dir/profile to ~/"
-    mv $start_dir/profile ~/
-
-    # Use ~/code and ~/current like the regular python service for better compatibility
-    msg "installing application to ~/current/ from $start_dir"
-    rsync -avH --delete --exclude "data" --exclude "README.rst" * ~/current/
+  # Use ~/code and ~/current like the regular python service for better compatibility
+  msg "installing application to ~/current/ from ${start_dir}"
+  rsync -avH --delete --exclude "data" --exclude "README.rst" * ~/current/
 }
 
 # lets get started.
 
+STAGE="Step 0"
 msg "Step 0: getting ready for build::"
 move_to_approot
 
 # If you want to rebuild nginx from scratch and remove a previously good compile
 # uncomment this. Don't do this everytime, or else each build will be slow.
-# msg "Step 1A: cleaup old nginx build::"
-# clean_nginx
 
-msg "Step 1: install nginx::"
+STAGE="Step 1"
+msg "Step 1: install lua deps"
+install_lua_deps
+
+[ C["clean"] ] && msg "Step 1.5: cleaup old nginx build::" && clean_nginx
+
+STAGE="Step 2"
+msg "Step 2: install nginx::"
 install_nginx
 
-msg "Step 2: build profile::"
+STAGE="Step 3"
+msg "Step 3: build profile::"
 build_profile
 
-msg "Step 3: install application::"
+STAGE="Step 4"
+msg "Step 4: install application::"
 install_application
 
 msg "All done..."

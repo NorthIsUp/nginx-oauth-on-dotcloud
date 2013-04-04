@@ -3,10 +3,17 @@ nginx:
     buildscript: nginx/builder
     systempackages:
         - libpcre3-dev # needed for the Nginx rewrite module
-        - lua5.1 # needed???
+
+        # lua stuff
+        - lua5.1
+        - luarocks # to install lua packages
         - liblua5.1-dev # needed for the Nginx lua module
         - libluajit-5.1-dev # needed for the Nginx lua module fast
         - liblua5.1-json
+        - liblua5.1-socket2
+        - liblua5.1-socket-dev
+        - liblua5.1-sec1
+        - liblua5.1-sec-dev
     ports:
         www: http
     processes:
