@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -x
 
-WHITELIST_DOMAINS='{
-    ["disqus.com"] = true,
-    ["disqus.net"] = true,
-    ["northisup.com"] = true,
-}'
-
 DIR="$(dirname "$0")"
 PREFIX=$HOME/nginx
 # if there is a local exports file run it

@@ -1,6 +1,6 @@
 # Nginx-on-dotcloud
 
-Custom nginx install on dotcloud based on [tengine](https://github.com/alibaba/tengine/)
+Custom nginx install on dotcloud based on nginx, but mainly [openresty](http://openresty.org/)
 
 ## How to use
 
@@ -11,7 +11,25 @@ Custom nginx install on dotcloud based on [tengine](https://github.com/alibaba/t
 5. dotcloud push <app_name> .
 
 
-## Config
+## Persona Config (default)
+
+Before you push the nginx server you need to set the following env vars:
+
+- ``WHITELIST_DOMAINS`` a lua table of domains to whitelist
+
+Ok, but wtfbbq is a lua table? Well, the one I test with looks like this:
+
+    dotcloud env set 'WHITELIST_DOMAINS={
+        ["disqus.com"] = true,
+        ["disqus.net"] = true,
+        ["northisup.com"] = true,
+    }'
+
+You set these values on your instance by as such. You may also put them in your dotcloud.yml file but that is not recommended.
+
+## OAuth Config (hack the files)
+
+!!! right now to enable oauth you will need to edit the postinstall script
 
 Before you push the nginx server you need to set the following env vars:
 
@@ -19,14 +37,22 @@ Before you push the nginx server you need to set the following env vars:
 - ``ACCESS_APP_SECRET`` Github client secret
 - ``ACCESS_ORG`` Github org to allow to access the app
 
-You set these values on your instance by as such. You may also put them in your dotcloud.yml file but that is not recommended.
+ You set these values on your instance by as such. You may also put them in your dotcloud.yml file but that is not recommended.
 
-``` bash
-dotcloud env set \
-    'ACCESS_APP_ID=6dd82fd5a64a6f1acd9f912bcbe40004' \
-    'ACCESS_APP_SECRET=72fc1bf55b68d649bcd9c53a7d3a857156b24fb5' \
-    'ACCESS_ORG=disqus'
-```
+    dotcloud env set \
+        'ACCESS_APP_ID=6dd82fd5a64a6f1acd9f912bcbe40004' \
+        'ACCESS_APP_SECRET=72fc1bf55b68d649bcd9c53a7d3a857156b24fb5' \
+        'ACCESS_ORG=disqus'
+
+## Nginx compilation and customization
+
+tl;dr `nginx/builder -h`
+
+The current build script supports a few versions of nginx and uses openresty by default.
+
+- vanilla nginx
+- tengine nginx
+- openresty nginx
 
 If you need to change the way nginx is compiled, then you will need to look in the ``nginx/builder`` file. Add any more modules or configuration options to the `CONFIGOPTS` variable.
 

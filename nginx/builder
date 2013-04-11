@@ -171,6 +171,8 @@ install_lua_rocks() {
 
   msg "making luarocks from ${pwd}"
   make && make install
+
+  install_lua_deps
 }
 
 
@@ -243,8 +245,8 @@ install_nginx() {
   msg "remove some of the default config files from the nginx config directory that aren't needed"
   rm ${nginx_install_dir}/conf/*.default
 
-  # msg "cleaning up (${stage_dir}) since it is no longer needed"
-  # rm -rf ${stage_dir}
+  msg "cleaning up (${stage_dir}) since it is no longer needed"
+  rm -rf ${stage_dir}
 
   msg "change directories back to ${start_dir}"
   cd ${start_dir}
@@ -291,7 +293,6 @@ install_nginx
 
 msg "Step 2.5: install luarocks::"
 install_lua_rocks
-install_lua_deps
 
 STAGE="Step 3"
 msg "Step 3: build profile::"
