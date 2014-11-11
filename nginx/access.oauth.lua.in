@@ -14,19 +14,19 @@ local ltn12 = require("ltn12")
 local aes = require("resty.aes")
 
 -- TODO: make this an oauth lib
+local config = require('oauth-config')
 local oauth = {
-    app_id = "@APP_ID@",
-    app_secret = "@APP_SECRET@",
-    orgs_whitelist = {["@ORG@"]=true},
-    aes_secret = "@AES_SECRET@",
-
-    scope = "repo,user,user:email,read:org",
     authorize_base_url = "https://github.com/login/oauth/authorize",
     access_token_url = "https://github.com/login/oauth/access_token",
     user_orgs_url = "https://api.github.com/user/orgs",
 }
 
-local crypter = aes:new(oauth.aes_secret, nil, aes.cipher(128, "ofb"))
+oauth.app_id = config.oauth.app_id
+oauth.app_secret = config.oauth.app_secret
+oauth.orgs_whitelist = config.oauth.orgs_whitelist
+oauth.scope = config.oauth.scope
+
+local crypter = aes:new(config.oauth.aes_secret, nil, aes.cipher(128, "ofb"))
 
 oauth.authorize_url = oauth.authorize_base_url.."?client_id="..oauth.app_id.."&scope="..oauth.scope
 
@@ -197,7 +197,6 @@ if not access_token then
             if redirect_uri then set_cookie('NGRedirectURI', redirect_uri, cookie_jar, 120) end
             if redirect_args then set_cookie('NGRedirectArgs', redirect_args, cookie_jar, 120) end
 
-            -- Redirect to the /oauth endpoint, request access to ALL scopes
             set_cookies(cookie_jar)
             return ngx.redirect(oauth.authorize_url)
         end
