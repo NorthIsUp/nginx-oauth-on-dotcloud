@@ -11,12 +11,6 @@ local cjson = require("cjson")
 local https = require("ssl.https")
 local url = require("socket.url")
 
-local function pt(t)
-  s = ""
-  for k,v in pairs(t) do s=s.."("..k..","..v.."), " end
-  ngx.log(ngx.INFO, block, s)
-end
-
 -- TODO: make this an oauth lib
 local oauth = {
     app_id = "@APP_ID@",
