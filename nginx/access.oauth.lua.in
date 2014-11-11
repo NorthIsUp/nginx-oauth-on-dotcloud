@@ -1,8 +1,8 @@
--- handles all the authentication, don't touch me
--- skip favicon
+require("resty.core")
+
 local block = ""
 
-
+-- skip favicon
 if ngx.var.uri == "/favicon.ico" then return ngx.location.capture(ngx.var.uri) end
 ngx.log(ngx.INFO, block, "################################################################################")
 
