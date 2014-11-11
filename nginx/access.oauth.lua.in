@@ -10,6 +10,7 @@ ngx.log(ngx.INFO, block, "######################################################
 local cjson = require("cjson")
 local https = require("ssl.https")
 local url = require("socket.url")
+local ltn12 = require("ltn12")
 
 -- TODO: make this an oauth lib
 local oauth = {
