@@ -133,7 +133,7 @@ local function unauthorized(status, message, token, return_json)
 	ngx.status = ngx.HTTP_UNAUTHORIZED
 	if return_json then
 		ngx.header.content_type = "application/json"
-		ngx.say('{"status": '..status..', "message": '..msg..'}')
+		ngx.say('{"status": '..status..', "message": '..message..'}')
 	else
 		ngx.header.content_type = "text/html"
 		ngx.say('<html><body><h1>', message, '</h1></body></html>')
