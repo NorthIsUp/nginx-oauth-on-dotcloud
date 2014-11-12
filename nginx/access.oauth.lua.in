@@ -141,6 +141,9 @@ local function unauthorized(status, message, token, return_json)
 end
 
 -- extract previous token from cookie if it is there
+local access_token = ngx.var.cookie_NGAccessToken or nil
+local authorized = ngx.var.cookie_NGAuthorized or nil
+
 if access_token then
 	access_token = ngx.decode_base64(access_token)
 	if access_token then
@@ -255,7 +258,6 @@ if redirect_args then
     ngx.log(ngx.INFO, block, "Redirecting to ", redirect_uri)
     del_cookie('NGRedirectURI', cookie_jar)
     del_cookie('NGRedirectArgs', cookie_jar)
-    set_cookies(cookie_jar)
     return ngx.redirect(redirect_uri)
 end
 ngx.log(ngx.INFO, block, "--------------------------------------------------------------------------------")
