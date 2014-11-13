@@ -82,7 +82,7 @@ function oauth.verify_user(access_token)
     end
 
     for i, org in ipairs(body) do
-        ngx.log(ngx.INFO, block, "testing", org.login)
+        ngx.log(ngx.INFO, block, "testing: ", org.login)
 
         if oauth.orgs_whitelist[org.login] then
             ngx.log(ngx.INFO, block, org.login, " is in orgs_whitelist")
