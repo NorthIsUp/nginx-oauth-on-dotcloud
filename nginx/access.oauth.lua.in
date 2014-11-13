@@ -11,7 +11,8 @@ local cjson = require("cjson")
 local https = require("ssl.https")
 local url = require("socket.url")
 local ltn12 = require("ltn12")
-local aes = require("resty.aes")
+local resty_session = require("resty.session")
+local session = resty_session.start()
 
 -- TODO: make this an oauth lib
 local config = require('oauth-config')
@@ -25,8 +26,6 @@ oauth.app_id = config.oauth.app_id
 oauth.app_secret = config.oauth.app_secret
 oauth.orgs_whitelist = config.oauth.orgs_whitelist
 oauth.scope = config.oauth.scope
-
-local crypter = aes:new(config.oauth.aes_secret, nil, aes.cipher(128, "ofb"))
 
 oauth.authorize_url = oauth.authorize_base_url.."?client_id="..oauth.app_id.."&scope="..oauth.scope
 
@@ -98,69 +97,41 @@ end
 
 
 local args = ngx.req.get_uri_args()
-local cookie_jar = {}
 
 
 function string.starts(String, Start)
 	return string.sub(String, 1, string.len(Start)) == Start
 end
 
-local function set_cookies(cookie_jar)
-  local vals={}
-  for k,v in pairs(cookie_jar) do table.insert(vals,v) end
-  ngx.header["Set-Cookie"] = vals
-end
-
-local function del_cookie(c, cookie_jar)
-  cookie_jar[c] = c.."=deleted; path=/; Expires=Thu, 01-Jan-1970 00:00:01 GMT"
-  set_cookies(cookie_jar)
-end
-
-local function set_cookie(c, v, cookie_jar, age)
-  age = age or 3000
-  cookie_jar[c] = c.."="..v.."; path=/;Max-Age="..age
-  set_cookies(cookie_jar)
-end
-
-
 local function unauthorized(status, message, token, return_json)
-	-- Expire their stored token
-	del_cookie('NGAccessToken', cookie_jar)
-	del_cookie('NGAuthorized', cookie_jar)
-	set_cookies(cookie_jar)
+    -- Expire their stored token
+    session.data.redirect_args = nil
+    session.data.redirect_uri = nil
+    session:save()
 
-	ngx.log(ngx.ERR, "Unauthorized access: ", token)
-	ngx.status = ngx.HTTP_UNAUTHORIZED
-	if return_json then
-		ngx.header.content_type = "application/json"
-		ngx.say('{"status": '..status..', "message": '..message..'}')
-	else
-		ngx.header.content_type = "text/html"
-		ngx.say('<html><body><h1>', message, '</h1></body></html>')
-	end
+    ngx.log(ngx.ERR, "Unauthorized access: ", token)
+    ngx.status = ngx.HTTP_UNAUTHORIZED
+    if return_json then
+        ngx.header.content_type = "application/json"
+        ngx.say('{"status": '..status..', "message": "'..message..'"}')
+    else
+        ngx.header.content_type = "text/html"
+        ngx.say('<html><body><h1>', message, '</h1></body></html>')
+    end
 end
 
 -- extract previous token from cookie if it is there
-local access_token = ngx.var.cookie_NGAccessToken or nil
-local authorized = ngx.var.cookie_NGAuthorized or nil
+local access_token = session.data.access_token or nil
+local authorized = session.data.authorized or nil
 
-if access_token then
-	access_token = ngx.decode_base64(access_token)
-	if access_token then
-		access_token = crypter:decrypt(access_token)
-		if access_token == "" then access_token = nil end
-	end
-end
-if authorized then
-	authorized = ngx.decode_base64(authorized)
-	if authorized then
-		authorized = crypter:decrypt(authorized)
-		if authorized ~= access_token.."true" then authorized = nil end
-	end
+if access_token == "" then access_token = nil end
+
+if authorized and authorized == "false" then
+    unauthorized(session.data.unauth_status, session.data.unauth_message, access_token, true)
+    return ngx.exit(ngx.HTTP_OK)
 end
 
-if access_token then set_cookie('NGAccessToken', ngx.encode_base64(crypter:encrypt(access_token)), cookie_jar) end
-if authorized then set_cookie('NGAuthorized', ngx.encode_base64(crypter:encrypt(access_token.."true")), cookie_jar) end
+if access_token and authorized ~= access_token.."true" then authorized = nil end
 
 -- We have nothing, do it all
 if not access_token then
@@ -189,18 +160,19 @@ if not access_token then
 
         -- both the cookie and proxy_pass token retrieval failed
         if not access_token then
-            local redirect_uri = ngx.var.cookie_NGRedirectURI or ngx.var.uri
-            local redirect_args = ngx.var.cookie_NGRedirectArgs or ngx.var.args
+            local redirect_uri = session.data.redirect_uri or ngx.var.uri
+            local redirect_args = session.data.redirect_args or ngx.var.args
             if string.starts(redirect_uri, "/_callback") then
                 redirect_uri = "/"
                 redirect_args = nil
             end
             ngx.log(ngx.INFO, block, 'no access_token')
 
-            if redirect_uri then set_cookie('NGRedirectURI', redirect_uri, cookie_jar, 120) end
-            if redirect_args then set_cookie('NGRedirectArgs', redirect_args, cookie_jar, 120) end
-
-            set_cookies(cookie_jar)
+            if redirect_uri then session.data.redirect_uri = redirect_uri end
+            if redirect_args then session.data.redirect_args = redirect_args end
+            if redirect_uri or redirect_args then
+                session:save()
+            end
             return ngx.redirect(oauth.authorize_url)
         end
     end
@@ -216,48 +188,41 @@ if authorized ~= access_token.."true" then
     local verify_user_response = oauth.verify_user(access_token)
     if verify_user_response.status ~= 200 then
         -- delete their bad token
-        del_cookie('NGAccessToken', cookie_jar)
-        del_cookie('NGAuthorized', cookie_jar)
-        set_cookies(cookie_jar)
-
-        -- 403 means that user not in required group. Display text message about why he have no permission to view this page
+        session.data.authorized = "false"
         if verify_user_response.status == 403 then
-            unauthorized(verify_user_response.status, verify_user_response.message, access_token, true)
-            return ngx.exit(ngx.HTTP_OK)
+            session.data.unauth_message = verify_user_response.message
+            session.data.unauth_status = verify_user_response.status
+        else
+            session.data.unauth_message = "Error accessing oauth.api for credentials"
+            session.data.unauth_status = 403
         end
-
-        -- Disallow access
-        ngx.status = verify_user_response.status
-        ngx.say('{"status": 503, "message": "Error accessing oauth.api for credentials"}')
-
-        return ngx.exit(ngx.HTTP_OK)
+    else
+        -- Ensure we have the minimum for access_level to this resource
+        if verify_user_response.body.access_level < 255 then
+            session.data.authorized = "false"
+            session.data.unauth_status = 403
+            session.data.unauth_message = '"USER_ID '..access_token..' has no access to this resource"'
+        else
+            -- Store the access_token within a cookie
+            session.data.authorized = access_token .. "true"
+        end
     end
-
-    -- Ensure we have the minimum for access_level to this resource
-    if verify_user_response.body.access_level < 255 then
-        unauthorized(403, '"USER_ID '..access_token..' has no access to this resource"', access_token, true)
-
-        return ngx.exit(ngx.HTTP_OK)
-    end
-
-    -- Store the access_token within a cookie
-    set_cookie('NGAccessToken', ngx.encode_base64(crypter:encrypt(access_token)), cookie_jar)
-    set_cookie('NGAuthorized', ngx.encode_base64(crypter:encrypt(access_token.."true")), cookie_jar)
+    session.data.access_token = access_token
+    session:save()
 end
 
--- should be authorized by now
-
 -- Support redirection back to your request if necessary
-local redirect_uri = ngx.var.cookie_NGRedirectUri
-local redirect_args = ngx.var.cookie_NGRedirectArgs
+local redirect_uri = session.data.redirect_uri or nil
+local redirect_args = session.data.redirect_args or nil
 
-if redirect_args then
+if redirect_uri then
     if redirect_args then
         redirect_uri = redirect_uri.."?"..redirect_args
     end
     ngx.log(ngx.INFO, block, "Redirecting to ", redirect_uri)
-    del_cookie('NGRedirectURI', cookie_jar)
-    del_cookie('NGRedirectArgs', cookie_jar)
+    session.data.redirect_args = nil
+    session.data.redirect_uri = nil
+    session:save()
     return ngx.redirect(redirect_uri)
 end
 ngx.log(ngx.INFO, block, "--------------------------------------------------------------------------------")
