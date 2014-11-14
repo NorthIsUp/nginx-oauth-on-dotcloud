@@ -20,6 +20,7 @@ local oauth = {
     authorize_base_url = "https://github.com/login/oauth/authorize",
     access_token_url = "https://github.com/login/oauth/access_token",
     user_orgs_url = "https://api.github.com/user/orgs",
+    user_url = "https://api.github.com/user"
 }
 
 oauth.app_id = config.oauth.app_id
@@ -70,6 +71,16 @@ function oauth.get_access_token(code)
     return oauth.get(url_string)
 end
 
+function oauth.get_user_info(access_token)
+    local params = {access_token=access_token}
+    local url_string = oauth.user_url.."?"..ngx.encode_args(params)
+    local response = oauth.get(url_string)
+    local body = response.body
+    if body.error then
+        return {status=401, message=body.error}
+    end
+    return {status=200, body={access_token=access_token, login=body.login, email=body.email}}
+end
 
 function oauth.verify_user(access_token)
     local params = {access_token=access_token}
@@ -103,17 +114,17 @@ function string.starts(String, Start)
 	return string.sub(String, 1, string.len(Start)) == Start
 end
 
-local function unauthorized(status, message, token, return_json)
+local function unauthorized(status, message, login, token, return_json)
     -- Expire their stored token
     session.data.redirect_args = nil
     session.data.redirect_uri = nil
     session:save()
 
-    ngx.log(ngx.ERR, "Unauthorized access: ", token)
+    ngx.log(ngx.ERR, "Unauthorized access: user=",login, " token=", token)
     ngx.status = ngx.HTTP_UNAUTHORIZED
     if return_json then
         ngx.header.content_type = "application/json"
-        ngx.say('{"status": '..status..', "message": "'..message..'"}')
+        ngx.say('{"status": '..status..', "user:", "'..login..'", "message": "'..message..'"}')
     else
         ngx.header.content_type = "text/html"
         ngx.say('<html><body><h1>', message, '</h1></body></html>')
@@ -127,7 +138,7 @@ local authorized = session.data.authorized or nil
 if access_token == "" then access_token = nil end
 
 if authorized and authorized == "false" then
-    unauthorized(session.data.unauth_status, session.data.unauth_message, access_token, true)
+    unauthorized(session.data.unauth_status, session.data.unauth_message, session.data.login, access_token, true)
     return ngx.exit(ngx.HTTP_OK)
 end
 
@@ -180,21 +191,28 @@ end
 
 
 -- Not authorized with current access_token
-if authorized ~= access_token.."true" then
+if not authorized or authorized ~= access_token.."true" then
     block = "[B]"
     ngx.log(ngx.INFO, block, 'authorized=', authorized)
     ngx.log(ngx.INFO, block, 'access_token=', access_token)
+    -- Check is we have capability to get user login
+    local user_info = oauth.get_user_info(access_token)
+    if user_info.status ~= 200 then
+        session.data.login = "Unknown"
+    else
+        session.data.login = user_info.body.login
+    end
+
     -- ensure we have a user with the proper access app-level
     local verify_user_response = oauth.verify_user(access_token)
     if verify_user_response.status ~= 200 then
         -- delete their bad token
         session.data.authorized = "false"
+        session.data.unauth_status = verify_user_response.status
         if verify_user_response.status == 403 then
             session.data.unauth_message = verify_user_response.message
-            session.data.unauth_status = verify_user_response.status
         else
             session.data.unauth_message = "Error accessing oauth.api for credentials"
-            session.data.unauth_status = 403
         end
     else
         -- Ensure we have the minimum for access_level to this resource
