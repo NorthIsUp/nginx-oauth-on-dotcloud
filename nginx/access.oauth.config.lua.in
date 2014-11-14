@@ -1,0 +1,10 @@
+module(..., package.seeall)
+
+-- note that org names are case-sensitive
+oauth = {
+    app_id = "@APP_ID@",
+    app_secret = "@APP_SECRET@",
+    orgs_whitelist = {["@ORG@"]=true},
+    aes_secret = "@AES_SECRET@",
+    scope = "repo,user,user:email,read:org",
+}
