@@ -27,6 +27,13 @@ Ok, but wtfbbq is a lua table? Well, the one I test with looks like this:
 
 You set these values on your instance by as such. You may also put them in your dotcloud.yml file but that is not recommended.
 
+## OAuth Plugin dependency
+
+- https://github.com/openresty/lua-resty-core
+- https://github.com/bungle/lua-resty-session
+- https://github.com/brunoos/luasec 0.4.1+ (for ssl.https), 0.4.0 - untested.
+- luajit 2.1 (2.0 - untested, because 2.1 is recomended by nginx-lua plugin and openresty)
+
 ## OAuth Config (hack the files)
 
 !!! right now to enable oauth you will need to edit the postinstall script
@@ -43,6 +50,21 @@ Before you push the nginx server you need to set the following env vars:
         'ACCESS_APP_ID=6dd82fd5a64a6f1acd9f912bcbe40004' \
         'ACCESS_APP_SECRET=72fc1bf55b68d649bcd9c53a7d3a857156b24fb5' \
         'ACCESS_ORG=disqus'
+
+## OAuth exported variables
+
+OAuth sets variable ``auth_user`` and ``auth_email`` with user's login and email (if availabe, otherwise they are set to "unknown"). You can use this variables inside your application:
+
+    location / {
+        set $auth_user 'unknwon';
+        set $auth_email 'unknown';
+        lua_need_request_body on;
+        access_by_lua_file "/etc/nginx/oauth.lua";
+        fastcgi_pass 127.0.0.1:9000;
+        fastcgi_param AUTH_USER $auth_user;
+        fastcgi_param REMOTE_USER $auth_user;
+        fastcgi_param AUTH_EMAIL $auth_email;
+    }
 
 ## Nginx compilation and customization
 
