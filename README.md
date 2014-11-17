@@ -27,6 +27,13 @@ Ok, but wtfbbq is a lua table? Well, the one I test with looks like this:
 
 You set these values on your instance by as such. You may also put them in your dotcloud.yml file but that is not recommended.
 
+## OAuth Plugin dependency
+
+- https://github.com/openresty/lua-resty-core
+- https://github.com/bungle/lua-resty-session
+- https://github.com/brunoos/luasec 0.4.1+ (for ssl.https), 0.4.0 - untested.
+- luajit 2.1 (2.0 - untested, because 2.1 is recomended by nginx-lua plugin and openresty)
+
 ## OAuth Config (hack the files)
 
 !!! right now to enable oauth you will need to edit the postinstall script
