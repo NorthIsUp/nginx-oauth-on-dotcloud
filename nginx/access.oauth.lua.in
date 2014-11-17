@@ -198,9 +198,11 @@ if not authorized or authorized ~= access_token.."true" then
     -- Check is we have capability to get user login
     local user_info = oauth.get_user_info(access_token)
     if user_info.status ~= 200 then
-        session.data.login = "Unknown"
+        session.data.login = "unknown"
+        session.data.email = "unknown"
     else
         session.data.login = user_info.body.login
+        session.data.email = user_info.body.email
     end
 
     -- ensure we have a user with the proper access app-level
@@ -243,4 +245,6 @@ if redirect_uri then
     session:save()
     return ngx.redirect(redirect_uri)
 end
+ngx.var.auth_user = session.data.login or "unknown"
+ngx.var.auth_email = session.data.email or "unknown"
 ngx.log(ngx.INFO, block, "--------------------------------------------------------------------------------")
