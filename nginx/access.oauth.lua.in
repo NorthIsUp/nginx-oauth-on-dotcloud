@@ -23,8 +23,25 @@ local oauth = {
     app_id = ngx.var.oauth_id,
     app_secret = ngx.var.oauth_secret,
     orgs_whitelist = ngx.var.oauth_orgs_whitelist,
-    scope = ngx.var.oauth_scope
+    scope = ngx.var.oauth_scope,
+    auth_page = ngx.var.oauth_auth_page
 }
+
+if oauth.auth_page then
+    local use_oauth = ngx.var.cookie_OAuthAuthType or nil
+    if (not use_oauth) then
+        local f = io.open(oauth.auth_page, "r")
+        ngx.header.content_type = "text/html"
+        ngx.say(f:read("*all"))
+        f:close()
+        return ngx.exit(ngx.HTTP_OK)
+    end
+
+    if (use_oauth ~= "github") then
+        ngx.status = ngx.HTTP_UNAUTHORIZED
+        return ngx.exit(ngx.HTTP_OK)
+    end
+end
 
 oauth.authorize_url = oauth.authorize_base_url.."?client_id="..oauth.app_id.."&scope="..oauth.scope
 
