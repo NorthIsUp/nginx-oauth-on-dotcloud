@@ -15,18 +15,16 @@ local resty_session = require("resty.session")
 local session = resty_session.start()
 
 -- TODO: make this an oauth lib
-local config = require('oauth-config')
 local oauth = {
     authorize_base_url = "https://github.com/login/oauth/authorize",
     access_token_url = "https://github.com/login/oauth/access_token",
     user_orgs_url = "https://api.github.com/user/orgs",
-    user_url = "https://api.github.com/user"
+    user_url = "https://api.github.com/user",
+    app_id = ngx.var.oauth_id,
+    app_secret = ngx.var.oauth_secret,
+    orgs_whitelist = ngx.var.oauth_orgs_whitelist,
+    scope = ngx.var.oauth_scope
 }
-
-oauth.app_id = config.oauth.app_id
-oauth.app_secret = config.oauth.app_secret
-oauth.orgs_whitelist = config.oauth.orgs_whitelist
-oauth.scope = config.oauth.scope
 
 oauth.authorize_url = oauth.authorize_base_url.."?client_id="..oauth.app_id.."&scope="..oauth.scope
 
@@ -87,6 +85,7 @@ function oauth.verify_user(access_token)
     local url_string = oauth.user_orgs_url.."?"..ngx.encode_args(params)
     local response = oauth.get(url_string)
     local body = response.body
+    oauth.orgs_whitelist = cjson.decode(oauth.orgs_whitelist)
 
     if body.error then
         return {status=401, message=body.error}
