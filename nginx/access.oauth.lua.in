@@ -126,10 +126,6 @@ end
 local args = ngx.req.get_uri_args()
 
 
-function string.starts(String, Start)
-	return string.sub(String, 1, string.len(Start)) == Start
-end
-
 local function unauthorized(status, message, login, token, return_json)
     -- Expire their stored token
     session.data.redirect_args = nil
@@ -189,14 +185,16 @@ if not access_token then
         if not access_token then
             local redirect_uri = session.data.redirect_uri or ngx.var.uri
             local redirect_args = session.data.redirect_args or ngx.var.args
-            if string.starts(redirect_uri, "/_callback") then
+            if not redirect_uri then
+                redirect_uri = "/"
+            elseif string.match(redirect_uri, "/_callback") then
                 redirect_uri = "/"
                 redirect_args = nil
             end
-            ngx.log(ngx.INFO, block, 'no access_token')
+            ngx.log(ngx.INFO, block, "no access_token, redirect_uri=", redirect_uri, " redirect_args=", redirect_args)
 
-            if redirect_uri then session.data.redirect_uri = redirect_uri end
-            if redirect_args then session.data.redirect_args = redirect_args end
+            session.data.redirect_uri = redirect_uri
+            session.data.redirect_args = redirect_args
             if redirect_uri or redirect_args then
                 session:save()
             end
@@ -252,7 +250,10 @@ local redirect_uri = session.data.redirect_uri or nil
 local redirect_args = session.data.redirect_args or nil
 
 if redirect_uri then
-    if redirect_args then
+    if string.match(redirect_uri, "/_callback") then
+        redirect_uri = "/"
+        redirect_args = nil
+    elseif redirect_args then
         redirect_uri = redirect_uri.."?"..redirect_args
     end
     ngx.log(ngx.INFO, block, "Redirecting to ", redirect_uri)
