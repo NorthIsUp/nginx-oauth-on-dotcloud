@@ -16,6 +16,7 @@ local session = resty_session.start()
 
 -- TODO: make this an oauth lib
 local oauth = {
+    _VERSION = "0.1"
     authorize_base_url = "https://github.com/login/oauth/authorize",
     access_token_url = "https://github.com/login/oauth/access_token",
     user_orgs_url = "https://api.github.com/user/orgs",
