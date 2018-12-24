@@ -15,7 +15,10 @@ events {
 http {
 
   lua_code_cache off;
-
+  set oauth_id '@APP_ID@';
+  set oauth_secret '@APP_SECRET@';
+  set oauth_orgs_whitelist '{"@ORG@": true}'
+  set oauth_scope 'repo,user:email,read:org';
   lua_package_path "@HOME@/nginx/lua/?.lua;;";
 
   include mime.types;
